@@ -49,6 +49,10 @@ HELP_TEXT = """\
  - 색깔·이미지 배경 제거       : 파란 세로 바, 회색 줄 같은 색상 배경이나 이미지로 채워진
                                배경을 흰 배경으로 바꿉니다. 표지뿐 아니라 바탕쪽(마스터페이지)에
                                표 형태로 박혀있는 배경도 함께 처리합니다.
+ - 정보란 표 제거              : "제정 : 2016년 6월 30일 / 심의 : .../ 소관부서 : .../
+                               관련단체(작성기관) : ..." 처럼 라벨이 모여있는 제정·개정
+                               이력 정보란 표를 통째로 지웁니다. 그림이나 색이 아니라 순수
+                               텍스트 표로 되어 있어도, 표지든 바탕쪽(마스터페이지)이든 지웁니다.
  - "표준시방서 ..." 부제 제거  : 표지의 영문 부제 문구를 지웁니다.
  - 개정/제정 날짜 제거         : "2021년 5월 12일 개정" 같은 날짜 문구를 지웁니다.
  - URL 제거                    : "http://..." 로 시작하는 문구를 지웁니다.
@@ -157,7 +161,7 @@ class App:
 
         import hwpx_cleanup  # 옵션 키/설명 재사용
         self.option_vars = {}
-        cover_keys = ['cover_image', 'cover_color', 'cover_subtitle',
+        cover_keys = ['cover_image', 'cover_color', 'cover_infobox', 'cover_subtitle',
                       'cover_date', 'cover_url', 'cover_foreign', 'cover_duplicate']
         page_keys = ['frontmatter_gap', 'trailing_matter']
 

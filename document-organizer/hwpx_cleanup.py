@@ -7,8 +7,9 @@ KCS 문서(hwpx) 일괄 정리 스크립트
      "http://..." URL 텍스트를 제거해서 표지를 심플하게 만든다.
   2) 표지와 목차 사이에 있는 "경과조치/건설기준 연혁" 페이지를 삭제한다. (본문/목차는 안 건드림)
   3) 본문 끝의 "집필위원" 이후 페이지들(집필위원/자문위원 표, 마지막 작성기관 페이지)을 통째로 삭제한다.
-  4) 마스터페이지(바탕쪽/배경쪽)에 박혀있는 워터마크 이미지 및 색/이미지로 채워진
-     배경(표 형태로 들어있는 경우 포함)도 제거한다.
+  4) 마스터페이지(바탕쪽/배경쪽)에 박혀있는 워터마크 이미지, 색/이미지로 채워진
+     배경(표 형태로 들어있는 경우 포함), "제정/개정/심의/소관부서" 등 이력 정보란
+     표(순수 텍스트 표인 경우도 포함)도 제거한다.
 
 사용법:
     pip install lxml
@@ -51,6 +52,18 @@ CODE_YEAR_RE = re.compile(r'[A-Za-z]{2,4}\s*\d{2}\s*\d{2}\s*\d{2}\s*[:：]\s*\d{
 # "KCS 61 00 00" 처럼 대분류(끝 두 자리가 00 00)만 표기된 코드.
 DIVISION_CODE_RE = re.compile(r'^[A-Za-z]{2,4}\s*\d{2}\s*00\s*00\s*$')
 
+# 표지/바탕쪽(마스터페이지)에 "제정 : 2016년 6월 30일 / 심의 : .../ 소관부서 : .../
+# 관련단체(작성기관) : ..." 식으로 박혀있는 제정·개정 이력 정보란 표를 찾기 위한 라벨들.
+# 글자 사이에 공백이 섞여 있는 경우가 많아 각 글자 사이에 공백을 허용한다.
+INFO_TABLE_LABEL_RES = [
+    re.compile(r'제\s*정'),
+    re.compile(r'개\s*정'),
+    re.compile(r'심\s*의'),
+    re.compile(r'자\s*문\s*검\s*토'),
+    re.compile(r'소\s*관\s*부\s*서'),
+    re.compile(r'관\s*련\s*단\s*체'),
+]
+
 
 def norm(s):
     return (s or '').replace(' ', '').replace(' ', '')
@@ -91,6 +104,7 @@ def find_colored_borderfill_ids(header_path):
 DEFAULT_OPTIONS = {
     'cover_image': True,      # 표지: 워터마크/로고 이미지 제거
     'cover_color': True,      # 표지: 색깔 채워진 배경 제거
+    'cover_infobox': True,    # 표지/바탕쪽: 제정/개정/심의 등 정보란 표 제거
     'cover_subtitle': True,   # 표지: "표준시방서 Korean Construction Specification" 부제 제거
     'cover_date': True,       # 표지: "OOOO년 O월 O일 개정/제정" 날짜 제거
     'cover_url': True,        # 표지: "http://..." URL 제거
@@ -103,6 +117,7 @@ DEFAULT_OPTIONS = {
 OPTION_LABELS = {
     'cover_image': '표지/바탕쪽: 워터마크/로고 이미지 제거',
     'cover_color': '표지/바탕쪽: 색깔·이미지로 채워진 배경 제거 (파란 바, 회색 줄 등)',
+    'cover_infobox': '표지/바탕쪽: 제정/개정/심의/소관부서 등 정보란 표 제거',
     'cover_subtitle': '표지: "표준시방서 Korean Construction Specification" 부제 제거',
     'cover_date': '표지: 개정/제정 날짜 텍스트 제거',
     'cover_url': '표지: URL(http://...) 텍스트 제거',
@@ -182,6 +197,23 @@ def remove_pics(root):
     return removed
 
 
+def remove_cover_info_table(root):
+    """"제정 : 2016년 6월 30일 / 심의 : ... / 소관부서 : ... / 관련단체(작성기관) : ..."
+    처럼 라벨이 모여있는 제정·개정 이력 정보란 표를 통째로 지운다. 그림도 색배경도 아닌
+    순수 텍스트 표라서 remove_pics/remap_colored_fills로는 안 지워지고, 표지 본문뿐
+    아니라 바탕쪽(마스터페이지)에도 박혀있는 경우가 있어 양쪽 다 검사한다."""
+    removed = 0
+    for tbl in list(root.iter(HP + 'tbl')):
+        text = ''.join(tbl.itertext())
+        matched = sum(1 for pat in INFO_TABLE_LABEL_RES if pat.search(text))
+        if matched >= 2:
+            parent = tbl.getparent()
+            if parent is not None:
+                parent.remove(tbl)
+                removed += 1
+    return removed
+
+
 def clean_cover(root, header_path, opts):
     """root[0]을 표지로 간주하고 opts에서 켜진 항목만 제거."""
     if len(root) == 0:
@@ -196,6 +228,9 @@ def clean_cover(root, header_path, opts):
 
     if opts.get('cover_image', True):
         remove_pics(cover)
+
+    if opts.get('cover_infobox', True):
+        remove_cover_info_table(cover)
 
     for t in cover.iter(HP + 't'):
         txt = t.text or ''
@@ -365,10 +400,11 @@ def process_one(src_path, dst_path, work_dir, opts=None):
             warnings.append("경과조치/연혁 구간을 못 찾아서 표지~목차 사이는 그대로 두었습니다.")
     first_tree.write(section_files[0], xml_declaration=True, encoding='UTF-8', standalone=True)
 
-    # 2) masterpage(바탕쪽/배경쪽)의 워터마크 이미지 및 색/이미지 배경 제거
-    #    워터마크가 <hp:pic> 그림 개체로 박혀있는 경우도 있지만, 표(hp:tbl) 셀에
-    #    색이나 이미지가 채워진 형태로 들어있는 경우도 있어서 표지와 동일한 방식으로 처리한다.
-    if opts.get('cover_image', True) or opts.get('cover_color', True):
+    # 2) masterpage(바탕쪽/배경쪽)의 워터마크 이미지, 색/이미지 배경, 제정·개정 이력
+    #    정보란 표 제거. 워터마크가 <hp:pic> 그림 개체로 박혀있는 경우도 있고, 표(hp:tbl)
+    #    셀에 색/이미지가 채워진 경우도 있고, 순수 텍스트로 된 정보란 표가 그대로 박혀있는
+    #    경우도 있어서 표지와 동일한 방식으로 세 가지 다 처리한다.
+    if opts.get('cover_image', True) or opts.get('cover_color', True) or opts.get('cover_infobox', True):
         for mp_path in glob.glob(os.path.join(extract_dir, 'Contents', 'masterpage*.xml')):
             mtree = etree.parse(mp_path)
             mroot = mtree.getroot()
@@ -377,6 +413,8 @@ def process_one(src_path, dst_path, work_dir, opts=None):
                 changed = remove_pics(mroot) > 0 or changed
             if opts.get('cover_color', True):
                 changed = remap_colored_fills(mroot, header_path) or changed
+            if opts.get('cover_infobox', True):
+                changed = remove_cover_info_table(mroot) > 0 or changed
             if changed:
                 mtree.write(mp_path, xml_declaration=True, encoding='UTF-8', standalone=True)
 
