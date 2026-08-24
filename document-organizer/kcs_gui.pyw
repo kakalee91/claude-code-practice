@@ -43,6 +43,16 @@ HELP_TEXT = """\
  2) 표지 / 페이지 정리     : 아래 체크된 항목만 골라서 정리합니다.
  3) HWPX -> HWP 되돌리기   : 정리가 끝난 .hwpx를 다시 .hwp로 저장합니다. (필요할 때만 켜세요)
 
+[저장 위치]
+ 2번(표지/페이지 정리) 작업의 결과 파일이 어디에 저장될지를 고릅니다.
+ - 원본과 같은 폴더에 저장 : 기존 방식. 원본 옆에 "파일명_정리됨.hwpx"로 저장됩니다.
+ - 지정한 폴더에 저장       : 폴더 하나를 정해두면, 실행할 때마다 결과 파일이 항상 그
+                             폴더로 바로 저장(재실행 시 자동 덮어쓰기)됩니다. 오류를 발견해서
+                             원본을 고치고 다시 돌릴 때, 결과 파일을 수동으로 옮기거나
+                             덮어쓸 필요가 없어집니다. 여러 하위 폴더를 함께 처리하는
+                             경우(하위 폴더까지 포함 체크) 이름이 겹치지 않도록 지정한
+                             폴더 밑에 원래의 하위 폴더 구조를 그대로 만들어 저장합니다.
+
 [표지/바탕쪽에서 정리하는 항목]
  - 워터마크/로고 이미지 제거   : 표지 및 바탕쪽(마스터페이지)에 박힌 워터마크, 기관 로고 등
                                이미지를 지웁니다.
@@ -151,8 +161,32 @@ class App:
         ttk.Checkbutton(frame_top, text="하위 폴더까지 포함",
                         variable=self.var_recursive).pack(anchor="w", padx=8, pady=(0, 6))
 
+        # --- 저장 위치 ---
+        frame_out = ttk.LabelFrame(root, text="② 저장 위치 (2번 표지/페이지 정리 결과가 저장될 곳)")
+        frame_out.pack(fill="x", padx=10, pady=5)
+
+        self.var_output_same = tk.BooleanVar(value=True)
+        ttk.Radiobutton(frame_out, text="원본과 같은 폴더에 저장 (파일명_정리됨.hwpx)",
+                        variable=self.var_output_same, value=True,
+                        command=self.on_output_mode_change).pack(anchor="w", padx=10, pady=(6, 2))
+
+        out_row = ttk.Frame(frame_out)
+        out_row.pack(fill="x", padx=10, pady=(0, 8))
+        ttk.Radiobutton(out_row, text="지정한 폴더에 저장:", variable=self.var_output_same,
+                        value=False, command=self.on_output_mode_change).pack(side="left")
+        self.var_output_dir = tk.StringVar(value="")
+        self.output_dir_entry = ttk.Entry(out_row, textvariable=self.var_output_dir,
+                                           state="disabled")
+        self.output_dir_entry.pack(side="left", fill="x", expand=True, padx=6)
+        self.output_dir_button = ttk.Button(out_row, text="폴더 선택", command=self.choose_output_dir,
+                                             state="disabled")
+        self.output_dir_button.pack(side="left")
+        ttk.Label(frame_out, text="(재실행할 때마다 이 폴더로 바로 덮어써서 저장되므로,"
+                                   " 오류를 고친 뒤 결과 파일을 따로 옮길 필요가 없습니다)",
+                  foreground="#666666").pack(anchor="w", padx=10, pady=(0, 6))
+
         # --- 작업 선택 ---
-        frame_opt = ttk.LabelFrame(root, text="② 실행할 작업 (위에서부터 순서대로 실행됩니다)")
+        frame_opt = ttk.LabelFrame(root, text="③ 실행할 작업 (위에서부터 순서대로 실행됩니다)")
         frame_opt.pack(fill="x", padx=10, pady=5)
 
         self.var_step1 = tk.BooleanVar(value=True)
@@ -213,7 +247,7 @@ class App:
         # --- 실행 버튼 ---
         frame_run = ttk.Frame(root)
         frame_run.pack(fill="x", padx=10, pady=(0, 5))
-        self.run_button = ttk.Button(frame_run, text="③ 실행", command=self.start_run)
+        self.run_button = ttk.Button(frame_run, text="④ 실행", command=self.start_run)
         self.run_button.pack(side="left")
         self.status_label = ttk.Label(frame_run, text="대기 중")
         self.status_label.pack(side="left", padx=10)
@@ -277,6 +311,20 @@ class App:
         self.listbox.delete(0, "end")
         self.folders = []
 
+    # ---------- 저장 위치 ----------
+    def on_output_mode_change(self):
+        if self.var_output_same.get():
+            self.output_dir_entry.config(state="disabled")
+            self.output_dir_button.config(state="disabled")
+        else:
+            self.output_dir_entry.config(state="normal")
+            self.output_dir_button.config(state="normal")
+
+    def choose_output_dir(self):
+        path = filedialog.askdirectory(title="정리 결과를 저장할 폴더 선택")
+        if path:
+            self.var_output_dir.set(os.path.normpath(path))
+
     # ---------- 로그 ----------
     def poll_log_queue(self):
         try:
@@ -307,6 +355,9 @@ class App:
         if self.var_step2.get() and not any(v.get() for v in self.option_vars.values()):
             messagebox.showwarning("알림", "2번 작업의 세부 항목을 하나 이상 선택해주세요.")
             return
+        if not self.var_output_same.get() and not self.var_output_dir.get().strip():
+            messagebox.showwarning("알림", "저장할 폴더를 지정해주세요.")
+            return
 
         self.run_button.config(state="disabled")
         self.status_label.config(text="작업 중...")
@@ -324,6 +375,7 @@ class App:
         try:
             folders = list(self.folders)
             recursive = self.var_recursive.get()
+            output_dir = None if self.var_output_same.get() else self.var_output_dir.get().strip()
 
             if self.var_step1.get():
                 self.append_log("===== 1) HWP -> HWPX 변환 시작 =====\n")
@@ -341,7 +393,7 @@ class App:
                     self.append_log("선택된 항목: " +
                                      ", ".join(hwpx_cleanup.OPTION_LABELS[k] for k, v in opts.items() if v) +
                                      "\n\n")
-                    hwpx_cleanup.run(folders, recursive, opts)
+                    hwpx_cleanup.run(folders, recursive, opts, output_dir=output_dir)
                 except Exception:
                     self.append_log("[오류] 정리 작업 중 문제 발생:\n" + traceback.format_exc() + "\n")
 

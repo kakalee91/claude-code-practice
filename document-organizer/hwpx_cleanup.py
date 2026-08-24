@@ -524,56 +524,74 @@ def process_one(src_path, dst_path, work_dir, opts=None):
     return warnings
 
 
-def run(paths, recursive=False, opts=None):
+def run(paths, recursive=False, opts=None, output_dir=None):
     """GUI 등 다른 스크립트에서 그대로 불러 쓰기 위한 진입점.
     paths: 폴더 경로 또는 .hwpx 파일 경로의 리스트 (섞여 있어도 됨).
-    opts: DEFAULT_OPTIONS와 같은 키를 가진 dict. None이면 전체 기본값(전부 켬) 사용."""
+    opts: DEFAULT_OPTIONS와 같은 키를 가진 dict. None이면 전체 기본값(전부 켬) 사용.
+    output_dir: 결과("..._정리됨.hwpx") 파일을 저장할 폴더. None이면 기존처럼 원본과
+    같은 폴더에 저장한다. 지정하면 재실행할 때마다 그 폴더로 바로 덮어써지므로,
+    오류를 고치고 다시 돌릴 때 결과 파일을 수동으로 옮길 필요가 없다.
+    (--recursive로 여러 하위 폴더를 함께 처리하는 경우, 이름이 겹치지 않도록
+    output_dir 밑에 원본 폴더 기준 상대 경로를 그대로 재현한다.)"""
     opts = opts if opts is not None else DEFAULT_OPTIONS
     pattern = "**/*.hwpx" if recursive else "*.hwpx"
-    files = []
+    file_entries = []  # (src_path, 상대경로 계산 기준이 되는 폴더)
     for path in paths:
         if os.path.isfile(path):
             if path.lower().endswith('.hwpx'):
-                files.append(path)
+                file_entries.append((path, os.path.dirname(path) or '.'))
         else:
-            files.extend(glob.glob(os.path.join(path, pattern), recursive=recursive))
-    files = [f for f in files if not f.endswith('_정리됨.hwpx')]
+            for f in glob.glob(os.path.join(path, pattern), recursive=recursive):
+                file_entries.append((f, path))
+    file_entries = [(f, base) for f, base in file_entries if not f.endswith('_정리됨.hwpx')]
 
-    if not files:
+    if not file_entries:
         print("hwpx 파일을 찾지 못했습니다.")
         return
 
-    print(f"총 {len(files)}개 파일 처리 시작.\n")
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
 
-    dbg("files found:", files)
+    print(f"총 {len(file_entries)}개 파일 처리 시작.\n")
+
+    dbg("files found:", [f for f, _ in file_entries])
 
     ok_count = 0
     fail_count = 0
     with tempfile.TemporaryDirectory() as work_dir:
         dbg("work_dir =", work_dir)
-        for src in files:
-            dst = os.path.splitext(src)[0] + '_정리됨.hwpx'
+        for src, base_dir in file_entries:
+            name = os.path.splitext(os.path.basename(src))[0] + '_정리됨.hwpx'
+            if output_dir:
+                rel_dir = os.path.relpath(os.path.dirname(src) or '.', base_dir)
+                out_dir = output_dir if rel_dir in ('.', '') else os.path.join(output_dir, rel_dir)
+                os.makedirs(out_dir, exist_ok=True)
+                dst = os.path.join(out_dir, name)
+            else:
+                dst = os.path.join(os.path.dirname(src), name)
             dbg(f"processing src={src!r} dst={dst!r} src_mtime_before={os.path.getmtime(src)}")
             try:
                 warnings = process_one(src, dst, work_dir, opts)
                 ok_count += 1
                 status = "완료" if not warnings else "완료(확인 필요)"
-                print(f"[{status}] {os.path.basename(src)} -> {os.path.basename(dst)}")
+                print(f"[{status}] {os.path.basename(src)} -> {dst}")
                 for w in warnings:
                     print(f"         ! {w}")
             except Exception as e:
                 fail_count += 1
                 print(f"[실패] {os.path.basename(src)} -> {e}")
 
-    print(f"\n총 {len(files)}개 중 성공 {ok_count}개, 실패 {fail_count}개")
+    print(f"\n총 {len(file_entries)}개 중 성공 {ok_count}개, 실패 {fail_count}개")
 
 
 def main():
     parser = argparse.ArgumentParser(description="KCS hwpx 문서 일괄 정리 (표지 정리 + 경과조치/집필위원 페이지 삭제)")
     parser.add_argument("folders", nargs="+", help="처리할 .hwpx 파일들이 있는 폴더 (여러 개 가능)")
     parser.add_argument("--recursive", action="store_true", help="하위 폴더까지 포함")
+    parser.add_argument("--output", "-o", metavar="폴더",
+                         help="결과(_정리됨.hwpx) 파일을 저장할 폴더. 생략하면 원본과 같은 폴더에 저장")
     args = parser.parse_args()
-    run(args.folders, args.recursive)
+    run(args.folders, args.recursive, output_dir=args.output)
 
 
 if __name__ == "__main__":
