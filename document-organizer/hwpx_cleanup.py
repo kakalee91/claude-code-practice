@@ -233,13 +233,20 @@ def remove_footer_ctrl(root):
 
 
 def remove_page_number_fields(root):
-    """쪽번호 자동 채번 필드(<hp:ctrl><hp:autoNum numType="PAGE">)를 지운다.
-    꼬리말/머리말 자체를 지우면 그 안의 쪽번호도 같이 사라지므로, 이 함수는
-    머리말/꼬리말 없이 쪽번호만 단독으로 들어있는 경우를 위한 보조 처리다."""
+    """쪽번호를 지운다. HWP에는 쪽번호를 넣는 방식이 두 가지 있다:
+      1) 꼬리말/머리말 안에 <hp:autoNum numType="PAGE"> 채번 필드를 넣는 방식
+         (꼬리말/머리말 자체를 지우면 이 필드도 같이 사라지지만, 머리말/꼬리말 없이
+         쪽번호만 단독으로 들어있는 경우를 위해 여기서도 한 번 더 확인한다)
+      2) "쪽 번호 매기기" 기능으로 본문에 직접 <hp:pageNum pos="BOTTOM_CENTER" .../>
+         지시자를 심는 방식 (예: "- 1 -" 처럼 페이지 하단 중앙에 표시). 이건 꼬리말이
+         아니라 섹션 본문 문단에 바로 박히기 때문에 꼬리말 삭제로는 안 지워진다.
+    두 경우 모두 해당 <hp:ctrl>을 통째로 지운다."""
     removed = 0
     for ctrl in list(root.iter(HP + 'ctrl')):
         auto = ctrl.find(HP + 'autoNum')
-        if auto is not None and auto.get('numType') == 'PAGE':
+        is_auto_page = auto is not None and auto.get('numType') == 'PAGE'
+        is_page_num = ctrl.find(HP + 'pageNum') is not None
+        if is_auto_page or is_page_num:
             parent = ctrl.getparent()
             if parent is not None:
                 parent.remove(ctrl)
