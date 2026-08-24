@@ -68,6 +68,13 @@ HELP_TEXT = """\
  - 집필위원 이후 페이지 삭제   : 본문이 끝난 뒤 나오는 집필위원/자문위원 명단, 마지막
                                작성기관 페이지를 전부 지웁니다. (그 앞의 빈 페이지도 같이 제거)
 
+[쪽번호/꼬리말 항목]
+ - 꼬리말 삭제                 : 문서에 설정된 꼬리말(페이지 하단 반복 영역) 자체를
+                               통째로 지웁니다. 꼬리말 안에 들어있던 쪽번호도 함께 사라집니다.
+ - 쪽번호 삭제                 : 꼬리말과 별도로(예: 머리말 쪽에) 남아있는 쪽번호 자동
+                               채번 필드를 지웁니다. (꼬리말을 지우면 그 안의 쪽번호는
+                               이미 같이 지워지므로, 이 항목은 보조적인 처리입니다)
+
 [안전장치]
  - 원본은 절대 바꾸지 않습니다. 결과는 항상 "원본이름_정리됨.hwpx" 새 파일로 저장됩니다.
  - 어떤 문서에 특정 항목(예: 경과조치 페이지)이 아예 없으면, 억지로 지우지 않고
@@ -164,6 +171,7 @@ class App:
         cover_keys = ['cover_image', 'cover_color', 'cover_infobox', 'cover_subtitle',
                       'cover_date', 'cover_url', 'cover_foreign', 'cover_duplicate']
         page_keys = ['frontmatter_gap', 'trailing_matter']
+        footer_keys = ['remove_footer', 'remove_page_number']
 
         ttk.Label(sub_frame, text="[표지 정리]", font=("", 9, "bold")).grid(
             row=0, column=0, sticky="w", pady=(4, 0))
@@ -182,8 +190,17 @@ class App:
             ttk.Checkbutton(sub_frame, text=hwpx_cleanup.OPTION_LABELS[key],
                             variable=var).grid(row=base_row + i, column=0, sticky="w")
 
+        base_row2 = base_row + len(page_keys) + 1
+        ttk.Label(sub_frame, text="[쪽번호/꼬리말]", font=("", 9, "bold")).grid(
+            row=base_row2, column=0, sticky="w", pady=(8, 0))
+        for i, key in enumerate(footer_keys, start=1):
+            var = tk.BooleanVar(value=hwpx_cleanup.DEFAULT_OPTIONS[key])
+            self.option_vars[key] = var
+            ttk.Checkbutton(sub_frame, text=hwpx_cleanup.OPTION_LABELS[key],
+                            variable=var).grid(row=base_row2 + i, column=0, sticky="w")
+
         quick_frame = ttk.Frame(sub_frame)
-        quick_frame.grid(row=base_row + len(page_keys) + 1, column=0, sticky="w", pady=(6, 0))
+        quick_frame.grid(row=base_row2 + len(footer_keys) + 1, column=0, sticky="w", pady=(6, 0))
         ttk.Button(quick_frame, text="세부 항목 전체 선택",
                    command=lambda: self.set_all_options(True)).pack(side="left", padx=(0, 6))
         ttk.Button(quick_frame, text="세부 항목 전체 해제",

@@ -10,6 +10,7 @@ KCS 문서(hwpx) 일괄 정리 스크립트
   4) 마스터페이지(바탕쪽/배경쪽)에 박혀있는 워터마크 이미지, 색/이미지로 채워진
      배경(표 형태로 들어있는 경우 포함), "제정/개정/심의/소관부서" 등 이력 정보란
      표(순수 텍스트 표인 경우도 포함)도 제거한다.
+  5) 문서에 설정된 꼬리말(쪽 하단 반복 영역)과 쪽번호(자동 채번 필드)를 삭제한다.
 
 사용법:
     pip install lxml
@@ -112,6 +113,8 @@ DEFAULT_OPTIONS = {
     'cover_duplicate': True,  # 표지: 같은 표지 블록이 통째로 중복된 경우 앞쪽(옛) 블록 제거
     'frontmatter_gap': True,  # 표지~목차 사이 경과조치/연혁 페이지 삭제
     'trailing_matter': True,  # 본문 끝 집필위원 이후 페이지 삭제
+    'remove_footer': True,       # 꼬리말 삭제 (안의 쪽번호도 함께 삭제됨)
+    'remove_page_number': True,  # 꼬리말과 별도로 남은 쪽번호 필드 삭제
 }
 
 OPTION_LABELS = {
@@ -125,6 +128,8 @@ OPTION_LABELS = {
     'cover_duplicate': '표지: 중복된 옛 표지 블록(코드/제목 반복) 제거',
     'frontmatter_gap': '표지~목차 사이 경과조치/연혁 페이지 삭제',
     'trailing_matter': '본문 끝 집필위원 이후 페이지(+ 앞 빈 페이지) 삭제',
+    'remove_footer': '꼬리말 삭제 (안의 쪽번호도 함께 삭제)',
+    'remove_page_number': '쪽번호 삭제 (꼬리말과 별도로 남은 경우)',
 }
 
 
@@ -210,6 +215,34 @@ def remove_cover_info_table(root):
             parent = tbl.getparent()
             if parent is not None:
                 parent.remove(tbl)
+                removed += 1
+    return removed
+
+
+def remove_footer_ctrl(root):
+    """머리말/꼬리말 통제 개체(<hp:ctrl><hp:header>...</hp:header></hp:ctrl> 또는
+    <hp:footer> 버전)를 통째로 지운다. 안에 들어있는 쪽번호 필드도 함께 사라진다."""
+    removed = 0
+    for ctrl in list(root.iter(HP + 'ctrl')):
+        if ctrl.find(HP + 'footer') is not None or ctrl.find(HP + 'header') is not None:
+            parent = ctrl.getparent()
+            if parent is not None:
+                parent.remove(ctrl)
+                removed += 1
+    return removed
+
+
+def remove_page_number_fields(root):
+    """쪽번호 자동 채번 필드(<hp:ctrl><hp:autoNum numType="PAGE">)를 지운다.
+    꼬리말/머리말 자체를 지우면 그 안의 쪽번호도 같이 사라지므로, 이 함수는
+    머리말/꼬리말 없이 쪽번호만 단독으로 들어있는 경우를 위한 보조 처리다."""
+    removed = 0
+    for ctrl in list(root.iter(HP + 'ctrl')):
+        auto = ctrl.find(HP + 'autoNum')
+        if auto is not None and auto.get('numType') == 'PAGE':
+            parent = ctrl.getparent()
+            if parent is not None:
+                parent.remove(ctrl)
                 removed += 1
     return removed
 
@@ -404,7 +437,11 @@ def process_one(src_path, dst_path, work_dir, opts=None):
     #    정보란 표 제거. 워터마크가 <hp:pic> 그림 개체로 박혀있는 경우도 있고, 표(hp:tbl)
     #    셀에 색/이미지가 채워진 경우도 있고, 순수 텍스트로 된 정보란 표가 그대로 박혀있는
     #    경우도 있어서 표지와 동일한 방식으로 세 가지 다 처리한다.
-    if opts.get('cover_image', True) or opts.get('cover_color', True) or opts.get('cover_infobox', True):
+    remove_footer = opts.get('remove_footer', True)
+    remove_page_number = opts.get('remove_page_number', True)
+
+    if opts.get('cover_image', True) or opts.get('cover_color', True) or \
+            opts.get('cover_infobox', True) or remove_footer or remove_page_number:
         for mp_path in glob.glob(os.path.join(extract_dir, 'Contents', 'masterpage*.xml')):
             mtree = etree.parse(mp_path)
             mroot = mtree.getroot()
@@ -415,10 +452,28 @@ def process_one(src_path, dst_path, work_dir, opts=None):
                 changed = remap_colored_fills(mroot, header_path) or changed
             if opts.get('cover_infobox', True):
                 changed = remove_cover_info_table(mroot) > 0 or changed
+            if remove_footer:
+                changed = remove_footer_ctrl(mroot) > 0 or changed
+            if remove_page_number:
+                changed = remove_page_number_fields(mroot) > 0 or changed
             if changed:
                 mtree.write(mp_path, xml_declaration=True, encoding='UTF-8', standalone=True)
 
-    # 3) 집필위원 이후 삭제 (없으면 마지막 빈 페이지만이라도 제거)
+    # 3) 꼬리말/쪽번호 삭제. 머리말/꼬리말은 마스터페이지가 아니라 실제로 쓰이는
+    #    section 파일 쪽에 통제 개체로 박혀있는 경우가 많아서 모든 section 파일을 훑는다.
+    if remove_footer or remove_page_number:
+        for sp in section_files:
+            stree = etree.parse(sp)
+            sroot = stree.getroot()
+            changed = False
+            if remove_footer:
+                changed = remove_footer_ctrl(sroot) > 0 or changed
+            if remove_page_number:
+                changed = remove_page_number_fields(sroot) > 0 or changed
+            if changed:
+                stree.write(sp, xml_declaration=True, encoding='UTF-8', standalone=True)
+
+    # 4) 집필위원 이후 삭제 (없으면 마지막 빈 페이지만이라도 제거)
     extra_removed_files = []
     if opts.get('trailing_matter', True):
         cut_section_idx, handled = remove_trailing_matter(section_files)
@@ -448,7 +503,7 @@ def process_one(src_path, dst_path, work_dir, opts=None):
     dbg(f"final section1 children just before repack: "
         f"{len(etree.parse(section_files[-1]).getroot())}")
 
-    # 4) 재압축 (원본 순서/압축방식 유지, 삭제된 파일은 건너뜀)
+    # 5) 재압축 (원본 순서/압축방식 유지, 삭제된 파일은 건너뜀)
     with zipfile.ZipFile(dst_path, 'w') as zout:
         for name, ctype in order:
             if name in extra_removed_files:
