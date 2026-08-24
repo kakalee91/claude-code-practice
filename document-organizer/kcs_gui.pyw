@@ -117,8 +117,8 @@ class App:
     def __init__(self, root):
         self.root = root
         root.title("KCS 문서 정리 도구")
-        root.geometry("880x760")
-        root.minsize(760, 600)
+        root.geometry("1000x900")
+        root.minsize(860, 650)
 
         self.folders = []
         self.log_queue = queue.Queue()
@@ -127,7 +127,7 @@ class App:
         # --- 상단 소개 ---
         intro_frame = ttk.Frame(root)
         intro_frame.pack(fill="x", padx=10, pady=(10, 0))
-        ttk.Label(intro_frame, text=INTRO_TEXT, justify="left", wraplength=840).pack(
+        ttk.Label(intro_frame, text=INTRO_TEXT, justify="left", wraplength=940).pack(
             side="left", anchor="w")
         ttk.Button(intro_frame, text="❓ 자세한 설명", command=self.show_help).pack(
             side="right", anchor="ne")
@@ -199,6 +199,8 @@ class App:
 
         sub_frame = ttk.Frame(frame_opt)
         sub_frame.pack(fill="x", padx=32, pady=(0, 4))
+        sub_frame.columnconfigure(0, weight=1, uniform="opt")
+        sub_frame.columnconfigure(1, weight=1, uniform="opt")
 
         import hwpx_cleanup  # 옵션 키/설명 재사용
         self.option_vars = {}
@@ -207,34 +209,12 @@ class App:
         page_keys = ['frontmatter_gap', 'trailing_matter']
         footer_keys = ['remove_footer', 'remove_page_number']
 
-        ttk.Label(sub_frame, text="[표지 정리]", font=("", 9, "bold")).grid(
-            row=0, column=0, sticky="w", pady=(4, 0))
-        for i, key in enumerate(cover_keys, start=1):
-            var = tk.BooleanVar(value=hwpx_cleanup.DEFAULT_OPTIONS[key])
-            self.option_vars[key] = var
-            ttk.Checkbutton(sub_frame, text=hwpx_cleanup.OPTION_LABELS[key],
-                            variable=var).grid(row=i, column=0, sticky="w")
-
-        base_row = len(cover_keys) + 1
-        ttk.Label(sub_frame, text="[페이지 삭제]", font=("", 9, "bold")).grid(
-            row=base_row, column=0, sticky="w", pady=(8, 0))
-        for i, key in enumerate(page_keys, start=1):
-            var = tk.BooleanVar(value=hwpx_cleanup.DEFAULT_OPTIONS[key])
-            self.option_vars[key] = var
-            ttk.Checkbutton(sub_frame, text=hwpx_cleanup.OPTION_LABELS[key],
-                            variable=var).grid(row=base_row + i, column=0, sticky="w")
-
-        base_row2 = base_row + len(page_keys) + 1
-        ttk.Label(sub_frame, text="[쪽번호/꼬리말]", font=("", 9, "bold")).grid(
-            row=base_row2, column=0, sticky="w", pady=(8, 0))
-        for i, key in enumerate(footer_keys, start=1):
-            var = tk.BooleanVar(value=hwpx_cleanup.DEFAULT_OPTIONS[key])
-            self.option_vars[key] = var
-            ttk.Checkbutton(sub_frame, text=hwpx_cleanup.OPTION_LABELS[key],
-                            variable=var).grid(row=base_row2 + i, column=0, sticky="w")
+        next_row = self._add_option_group(sub_frame, hwpx_cleanup, 0, "[표지 정리]", cover_keys)
+        next_row = self._add_option_group(sub_frame, hwpx_cleanup, next_row, "[페이지 삭제]", page_keys)
+        next_row = self._add_option_group(sub_frame, hwpx_cleanup, next_row, "[쪽번호/꼬리말]", footer_keys)
 
         quick_frame = ttk.Frame(sub_frame)
-        quick_frame.grid(row=base_row2 + len(footer_keys) + 1, column=0, sticky="w", pady=(6, 0))
+        quick_frame.grid(row=next_row, column=0, columnspan=2, sticky="w", pady=(8, 0))
         ttk.Button(quick_frame, text="세부 항목 전체 선택",
                    command=lambda: self.set_all_options(True)).pack(side="left", padx=(0, 6))
         ttk.Button(quick_frame, text="세부 항목 전체 해제",
@@ -242,20 +222,24 @@ class App:
 
         self.var_step3 = tk.BooleanVar(value=False)
         ttk.Checkbutton(frame_opt, text="3) HWPX → HWP로 되돌리기",
-                        variable=self.var_step3).pack(anchor="w", padx=10, pady=(6, 8))
+                        variable=self.var_step3).pack(anchor="w", padx=10, pady=(10, 8))
 
         # --- 실행 버튼 ---
+        ttk.Separator(root, orient="horizontal").pack(fill="x", padx=10, pady=(4, 0))
         frame_run = ttk.Frame(root)
-        frame_run.pack(fill="x", padx=10, pady=(0, 5))
-        self.run_button = ttk.Button(frame_run, text="④ 실행", command=self.start_run)
-        self.run_button.pack(side="left")
-        self.status_label = ttk.Label(frame_run, text="대기 중")
-        self.status_label.pack(side="left", padx=10)
+        frame_run.pack(fill="x", padx=10, pady=8)
+        style = ttk.Style()
+        style.configure("Run.TButton", font=("", 12, "bold"))
+        self.run_button = ttk.Button(frame_run, text="④ 실행", command=self.start_run,
+                                      style="Run.TButton")
+        self.run_button.pack(side="left", ipadx=24, ipady=6)
+        self.status_label = ttk.Label(frame_run, text="대기 중", font=("", 11))
+        self.status_label.pack(side="left", padx=14)
 
         # --- 로그 ---
         frame_log = ttk.LabelFrame(root, text="진행 로그")
         frame_log.pack(fill="both", expand=True, padx=10, pady=(5, 10))
-        self.log_text = tk.Text(frame_log, wrap="word", state="disabled")
+        self.log_text = tk.Text(frame_log, wrap="word", state="disabled", height=10)
         self.log_text.pack(side="left", fill="both", expand=True, padx=(8, 0), pady=8)
         log_scroll = ttk.Scrollbar(frame_log, orient="vertical", command=self.log_text.yview)
         log_scroll.pack(side="left", fill="y", pady=8)
@@ -274,6 +258,19 @@ class App:
         text.pack(fill="both", expand=True, padx=10, pady=10)
 
     # ---------- 세부 옵션 ----------
+    def _add_option_group(self, parent, hwpx_cleanup, row, title, keys, columns=2):
+        """title 아래에 keys 체크박스를 2단으로 배치해서 세로 길이를 줄인다.
+        다음 그룹이 이어서 쓸 row 번호를 돌려준다."""
+        ttk.Label(parent, text=title, font=("", 9, "bold")).grid(
+            row=row, column=0, columnspan=columns, sticky="w", pady=(8, 2))
+        for i, key in enumerate(keys):
+            var = tk.BooleanVar(value=hwpx_cleanup.DEFAULT_OPTIONS[key])
+            self.option_vars[key] = var
+            r, c = row + 1 + i // columns, i % columns
+            ttk.Checkbutton(parent, text=hwpx_cleanup.OPTION_LABELS[key],
+                            variable=var).grid(row=r, column=c, sticky="w", padx=(0, 16), pady=1)
+        return row + 1 + -(-len(keys) // columns)
+
     def set_all_options(self, value):
         for var in self.option_vars.values():
             var.set(value)
