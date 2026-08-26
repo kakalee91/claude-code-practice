@@ -585,9 +585,20 @@ def run(paths, recursive=False, opts=None, output_dir=None):
 
     dbg("files found:", [f for f, _ in file_entries])
 
+    # 시스템 임시 폴더(%TEMP%)가 일부 PC에서는 압축/보안 유틸리티가 관리하는
+    # 폴더(예: ...\ESTsoft\CreatorTemp)로 리디렉션되어 있어서, 그 안에 막 풀어놓은
+    # section*.xml이 처리 도중 사라지는 경우가 있었다(그 유틸리티의 자동 임시파일
+    # 정리 기능으로 추정). 이를 피하기 위해 시스템 임시 폴더 대신, 실제 처리 대상
+    # 파일과 같은 폴더(또는 지정된 저장 폴더) 밑에 작업용 임시 폴더를 만든다.
+    tmp_base = output_dir or os.path.dirname(os.path.abspath(file_entries[0][0])) or '.'
+    try:
+        tmpdir_ctx = tempfile.TemporaryDirectory(dir=tmp_base)
+    except OSError:
+        tmpdir_ctx = tempfile.TemporaryDirectory()
+
     ok_count = 0
     fail_count = 0
-    with tempfile.TemporaryDirectory() as work_dir:
+    with tmpdir_ctx as work_dir:
         dbg("work_dir =", work_dir)
         for src, base_dir in file_entries:
             name = os.path.splitext(os.path.basename(src))[0] + '_정리됨.hwpx'
