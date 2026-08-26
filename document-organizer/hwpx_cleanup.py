@@ -29,6 +29,7 @@ import shutil
 import zipfile
 import argparse
 import tempfile
+import time
 
 try:
     from lxml import etree
@@ -367,26 +368,38 @@ def dbg(*args):
         print('[DEBUG]', *args)
 
 
-def safe_parse(path):
+def safe_parse(path, retries=15, delay=0.3):
     """etree.parse를 감싸서, section*.xml이 비어있거나 손상돼 못 여는 경우
     lxml의 알아보기 힘든 원본 에러 대신 원인과 대처법을 알려주는 메시지를 낸다.
-    (원본 hwpx 파일 자체가 손상된 경우, 압축은 풀려도 그 안의 xml이 0바이트이거나
-    깨져있는 경우가 있다.)"""
-    try:
-        return etree.parse(path)
-    except Exception as e:
-        name = os.path.basename(path)
-        if not os.path.exists(path):
-            reason = "파일이 존재하지 않습니다"
-        elif os.path.getsize(path) == 0:
-            reason = "파일이 비어 있습니다(0바이트)"
-        else:
-            reason = f"XML 구조가 손상되어 읽을 수 없습니다 ({os.path.getsize(path)}바이트)"
-        raise RuntimeError(
-            f"'{name}' {reason}. 원본 hwpx 파일 자체가 손상됐을 가능성이 높습니다. "
-            f"한글에서 이 hwpx 파일을 열어 '다른 이름으로 저장'을 한 번 한 뒤, "
-            f"그렇게 새로 저장된 파일로 다시 시도해보세요. (원본 오류: {e})"
-        ) from e
+
+    막 압축을 풀어놓은 파일인데도 '파일이 없다'는 오류가 나는 경우가 있는데,
+    이는 실제 손상이 아니라 일부 PC에서 백신이나 클라우드 동기화(OneDrive 등)
+    프로그램이 방금 생성된 파일을 순간적으로 스캔/잠금 처리하면서 생기는 일시적
+    현상으로 보인다(보통 1초 안에 다시 정상적으로 읽힌다). 그래서 '파일이 아예
+    없는' 경우에 한해 잠깐씩 재시도해보고, 그래도 안 되거나 파일이 있는데
+    내용 자체가 비어있거나 깨진 경우에는 바로 실패로 처리한다."""
+    last_err = None
+    for attempt in range(retries):
+        try:
+            return etree.parse(path)
+        except Exception as e:
+            last_err = e
+            if os.path.exists(path):
+                break
+            time.sleep(delay)
+
+    name = os.path.basename(path)
+    if not os.path.exists(path):
+        reason = "파일이 존재하지 않습니다"
+    elif os.path.getsize(path) == 0:
+        reason = "파일이 비어 있습니다(0바이트)"
+    else:
+        reason = f"XML 구조가 손상되어 읽을 수 없습니다 ({os.path.getsize(path)}바이트)"
+    raise RuntimeError(
+        f"'{name}' {reason}. 원본 hwpx 파일 자체가 손상됐을 가능성이 높습니다. "
+        f"한글에서 이 hwpx 파일을 열어 '다른 이름으로 저장'을 한 번 한 뒤, "
+        f"그렇게 새로 저장된 파일로 다시 시도해보세요. (원본 오류: {last_err})"
+    ) from last_err
 
 
 def remove_trailing_matter(section_paths):
