@@ -367,6 +367,28 @@ def dbg(*args):
         print('[DEBUG]', *args)
 
 
+def safe_parse(path):
+    """etree.parse를 감싸서, section*.xml이 비어있거나 손상돼 못 여는 경우
+    lxml의 알아보기 힘든 원본 에러 대신 원인과 대처법을 알려주는 메시지를 낸다.
+    (원본 hwpx 파일 자체가 손상된 경우, 압축은 풀려도 그 안의 xml이 0바이트이거나
+    깨져있는 경우가 있다.)"""
+    try:
+        return etree.parse(path)
+    except Exception as e:
+        name = os.path.basename(path)
+        if not os.path.exists(path):
+            reason = "파일이 존재하지 않습니다"
+        elif os.path.getsize(path) == 0:
+            reason = "파일이 비어 있습니다(0바이트)"
+        else:
+            reason = f"XML 구조가 손상되어 읽을 수 없습니다 ({os.path.getsize(path)}바이트)"
+        raise RuntimeError(
+            f"'{name}' {reason}. 원본 hwpx 파일 자체가 손상됐을 가능성이 높습니다. "
+            f"한글에서 이 hwpx 파일을 열어 '다른 이름으로 저장'을 한 번 한 뒤, "
+            f"그렇게 새로 저장된 파일로 다시 시도해보세요. (원본 오류: {e})"
+        ) from e
+
+
 def remove_trailing_matter(section_paths):
     """'집필위원'이 나오는 section 파일을 찾아 그 문단부터 끝까지, 그리고 그 뒤에 오는
     section 파일 전체를 삭제 대상으로 표시한다. (뒤에 오는 section 파일은 흔치 않음)
@@ -374,7 +396,7 @@ def remove_trailing_matter(section_paths):
     남아있는지 확인해서 있으면 그것만이라도 제거한다."""
     dbg("remove_trailing_matter: section_paths =", section_paths)
     for idx, path in enumerate(section_paths):
-        tree = etree.parse(path)
+        tree = safe_parse(path)
         root = tree.getroot()
         children = list(root)
         cut_at = None
@@ -395,7 +417,7 @@ def remove_trailing_matter(section_paths):
 
     # '집필위원'을 못 찾은 경우: 마지막 section 파일에서 빈 트레일링 페이지만 제거 시도
     last_path = section_paths[-1]
-    tree = etree.parse(last_path)
+    tree = safe_parse(last_path)
     root = tree.getroot()
     before = len(root)
     result = remove_trailing_blank_page(root)
@@ -431,7 +453,7 @@ def process_one(src_path, dst_path, work_dir, opts=None):
     warnings = []
 
     # 1) 앞부분(표지+경과조치+목차)은 항상 첫 section 파일에 있다고 가정
-    first_tree = etree.parse(section_files[0])
+    first_tree = safe_parse(section_files[0])
     first_root = first_tree.getroot()
     clean_cover(first_root, header_path, opts)
     if opts.get('frontmatter_gap', True):
@@ -450,7 +472,7 @@ def process_one(src_path, dst_path, work_dir, opts=None):
     if opts.get('cover_image', True) or opts.get('cover_color', True) or \
             opts.get('cover_infobox', True) or remove_footer or remove_page_number:
         for mp_path in glob.glob(os.path.join(extract_dir, 'Contents', 'masterpage*.xml')):
-            mtree = etree.parse(mp_path)
+            mtree = safe_parse(mp_path)
             mroot = mtree.getroot()
             changed = False
             if opts.get('cover_image', True):
@@ -470,7 +492,7 @@ def process_one(src_path, dst_path, work_dir, opts=None):
     #    section 파일 쪽에 통제 개체로 박혀있는 경우가 많아서 모든 section 파일을 훑는다.
     if remove_footer or remove_page_number:
         for sp in section_files:
-            stree = etree.parse(sp)
+            stree = safe_parse(sp)
             sroot = stree.getroot()
             changed = False
             if remove_footer:
@@ -508,7 +530,7 @@ def process_one(src_path, dst_path, work_dir, opts=None):
             open(meta_path, 'w', encoding='utf-8').write(data)
 
     dbg(f"final section1 children just before repack: "
-        f"{len(etree.parse(section_files[-1]).getroot())}")
+        f"{len(safe_parse(section_files[-1]).getroot())}")
 
     # 5) 재압축 (원본 순서/압축방식 유지, 삭제된 파일은 건너뜀)
     with zipfile.ZipFile(dst_path, 'w') as zout:
