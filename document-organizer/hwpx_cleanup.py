@@ -539,11 +539,19 @@ def process_one(src_path, dst_path, work_dir, opts=None):
                 continue
             data = open(meta_path, encoding='utf-8').read()
             for fn in extra_removed_files:
+                # 파일명(href)으로 참조하는 <opf:item .../> 항목 제거.
                 data = re.sub(r'<[^<>]*' + re.escape(fn) + r'[^<>]*/>\s*', '', data)
+                # content.hpf의 재생 순서(spine)는 <opf:itemref idref="section2"/>처럼
+                # 파일명이 아니라 위 item의 id로만 참조하기 때문에, 파일명 기준
+                # 정규식으로는 이 줄이 안 지워진다. 이게 그대로 남으면 존재하지 않는
+                # item을 가리키게 되어 한글에서 파일이 손상된 것으로 취급되어 아예
+                # 열리지 않는다.
+                item_id = os.path.splitext(os.path.basename(fn))[0]
+                data = re.sub(
+                    r'<opf:itemref\s+idref="' + re.escape(item_id) + r'"[^>]*/>\s*',
+                    '', data
+                )
             open(meta_path, 'w', encoding='utf-8').write(data)
-
-    dbg(f"final section1 children just before repack: "
-        f"{len(safe_parse(section_files[-1]).getroot())}")
 
     # 5) 재압축 (원본 순서/압축방식 유지, 삭제된 파일은 건너뜀)
     with zipfile.ZipFile(dst_path, 'w') as zout:
