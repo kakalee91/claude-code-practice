@@ -531,22 +531,38 @@ def process_one(src_path, dst_path, work_dir, opts=None):
                 os.remove(path)
                 extra_removed_files.append(name)
 
-    # content.hpf / manifest.xml에서 삭제된 section 파일 참조 제거
+    # content.hpf / manifest.xml / container.rdf에서 삭제된 section 파일 참조 제거.
+    # 삭제된 파일 하나가 최대 세 군데에서 따로 참조되는데, 셋 다 안 지우면 존재하지
+    # 않는 파일에 대한 메타데이터가 남아 한글이 파일을 손상된 것으로 판단해 아예
+    # 열지 못한다(실제로 재현·확인함).
     if extra_removed_files:
-        for meta_name in ('Contents/content.hpf', 'META-INF/manifest.xml'):
+        for meta_name in ('Contents/content.hpf', 'META-INF/manifest.xml', 'META-INF/container.rdf'):
             meta_path = os.path.join(extract_dir, meta_name)
             if not os.path.exists(meta_path):
                 continue
             data = open(meta_path, encoding='utf-8').read()
             for fn in extra_removed_files:
-                # 파일명(href)으로 참조하는 <opf:item .../> 항목 제거.
-                data = re.sub(r'<[^<>]*' + re.escape(fn) + r'[^<>]*/>\s*', '', data)
-                # content.hpf의 재생 순서(spine)는 <opf:itemref idref="section2"/>처럼
-                # 파일명이 아니라 위 item의 id로만 참조하기 때문에, 파일명 기준
-                # 정규식으로는 이 줄이 안 지워진다. 이게 그대로 남으면 존재하지 않는
-                # item을 가리키게 되어 한글에서 파일이 손상된 것으로 취급되어 아예
-                # 열리지 않는다.
+                # 1) container.rdf는 삭제된 파일을 통째로 담은 블록 두 개로 참조한다:
+                #    <rdf:Description rdf:about=""><ns0:hasPart .../ rdf:resource="파일"/></rdf:Description>
+                #    <rdf:Description rdf:about="파일">...(타입 정보)...</rdf:Description>
+                #    아래 2)의 파일명 기준 정규식이 먼저 실행되면 hasPart 자기닫힘 태그만
+                #    지워지고 빈 <rdf:Description rdf:about=""></rdf:Description> 껍데기가
+                #    남으므로, 통째로 지우는 이 블록 단위 치환을 먼저 한다.
                 item_id = os.path.splitext(os.path.basename(fn))[0]
+                data = re.sub(
+                    r'<rdf:Description rdf:about="">\s*<[^:<>]+:hasPart[^>]*rdf:resource="'
+                    + re.escape(fn) + r'"\s*/>\s*</rdf:Description>\s*',
+                    '', data
+                )
+                data = re.sub(
+                    r'<rdf:Description rdf:about="' + re.escape(fn) + r'">.*?</rdf:Description>\s*',
+                    '', data, flags=re.S
+                )
+                # 2) content.hpf: 파일명(href)으로 참조하는 <opf:item .../> 항목 제거.
+                data = re.sub(r'<[^<>]*' + re.escape(fn) + r'[^<>]*/>\s*', '', data)
+                # 3) content.hpf의 재생 순서(spine)는 <opf:itemref idref="section2"/>처럼
+                #    파일명이 아니라 위 item의 id로만 참조하기 때문에, 파일명 기준
+                #    정규식으로는 이 줄이 안 지워진다.
                 data = re.sub(
                     r'<opf:itemref\s+idref="' + re.escape(item_id) + r'"[^>]*/>\s*',
                     '', data
