@@ -516,7 +516,6 @@ def process_one(src_path, dst_path, work_dir, opts=None):
                 stree.write(sp, xml_declaration=True, encoding='UTF-8', standalone=True)
 
     # 4) 집필위원 이후 삭제 (없으면 마지막 빈 페이지만이라도 제거)
-    extra_removed_files = []
     if opts.get('trailing_matter', True):
         cut_section_idx, handled = remove_trailing_matter(section_files)
         if cut_section_idx is None:
@@ -525,55 +524,23 @@ def process_one(src_path, dst_path, work_dir, opts=None):
             else:
                 warnings.append("'집필위원' 문구를 못 찾았고, 끝에 빈 페이지도 없어서 마지막 부분은 그대로 두었습니다.")
         else:
-            # 집필위원이 발견된 section 파일 뒤에 오는 section 파일은 전부 삭제
+            # 집필위원이 발견된 section 파일 뒤에 오는 section 파일은 zip에서 아예
+            # 지우지 않는다. section 파일을 통째로 삭제하면 content.hpf/container.rdf의
+            # 참조를 아무리 빠짐없이 정리해도 한글이 파일을 손상된 것으로 판단해 열지
+            # 못한다(실제 파일로 재현·확인함). 대신 파일은 그대로 두고, 그 섹션의 페이지
+            # 설정(secPr)이 담긴 첫 문단만 남기고 나머지 문단(집필위원 내용)만 지운다.
             for path in section_files[cut_section_idx + 1:]:
-                name = os.path.relpath(path, extract_dir).replace(os.sep, '/')
-                os.remove(path)
-                extra_removed_files.append(name)
+                ttree = safe_parse(path)
+                troot = ttree.getroot()
+                tchildren = list(troot)
+                if len(tchildren) > 1:
+                    for i in sorted(range(1, len(tchildren)), reverse=True):
+                        troot.remove(tchildren[i])
+                    ttree.write(path, xml_declaration=True, encoding='UTF-8', standalone=True)
 
-    # content.hpf / manifest.xml / container.rdf에서 삭제된 section 파일 참조 제거.
-    # 삭제된 파일 하나가 최대 세 군데에서 따로 참조되는데, 셋 다 안 지우면 존재하지
-    # 않는 파일에 대한 메타데이터가 남아 한글이 파일을 손상된 것으로 판단해 아예
-    # 열지 못한다(실제로 재현·확인함).
-    if extra_removed_files:
-        for meta_name in ('Contents/content.hpf', 'META-INF/manifest.xml', 'META-INF/container.rdf'):
-            meta_path = os.path.join(extract_dir, meta_name)
-            if not os.path.exists(meta_path):
-                continue
-            data = open(meta_path, encoding='utf-8').read()
-            for fn in extra_removed_files:
-                # 1) container.rdf는 삭제된 파일을 통째로 담은 블록 두 개로 참조한다:
-                #    <rdf:Description rdf:about=""><ns0:hasPart .../ rdf:resource="파일"/></rdf:Description>
-                #    <rdf:Description rdf:about="파일">...(타입 정보)...</rdf:Description>
-                #    아래 2)의 파일명 기준 정규식이 먼저 실행되면 hasPart 자기닫힘 태그만
-                #    지워지고 빈 <rdf:Description rdf:about=""></rdf:Description> 껍데기가
-                #    남으므로, 통째로 지우는 이 블록 단위 치환을 먼저 한다.
-                item_id = os.path.splitext(os.path.basename(fn))[0]
-                data = re.sub(
-                    r'<rdf:Description rdf:about="">\s*<[^:<>]+:hasPart[^>]*rdf:resource="'
-                    + re.escape(fn) + r'"\s*/>\s*</rdf:Description>\s*',
-                    '', data
-                )
-                data = re.sub(
-                    r'<rdf:Description rdf:about="' + re.escape(fn) + r'">.*?</rdf:Description>\s*',
-                    '', data, flags=re.S
-                )
-                # 2) content.hpf: 파일명(href)으로 참조하는 <opf:item .../> 항목 제거.
-                data = re.sub(r'<[^<>]*' + re.escape(fn) + r'[^<>]*/>\s*', '', data)
-                # 3) content.hpf의 재생 순서(spine)는 <opf:itemref idref="section2"/>처럼
-                #    파일명이 아니라 위 item의 id로만 참조하기 때문에, 파일명 기준
-                #    정규식으로는 이 줄이 안 지워진다.
-                data = re.sub(
-                    r'<opf:itemref\s+idref="' + re.escape(item_id) + r'"[^>]*/>\s*',
-                    '', data
-                )
-            open(meta_path, 'w', encoding='utf-8').write(data)
-
-    # 5) 재압축 (원본 순서/압축방식 유지, 삭제된 파일은 건너뜀)
+    # 5) 재압축 (원본 순서/압축방식 그대로 유지)
     with zipfile.ZipFile(dst_path, 'w') as zout:
         for name, ctype in order:
-            if name in extra_removed_files:
-                continue
             fpath = os.path.join(extract_dir, name)
             if not os.path.exists(fpath):
                 continue
